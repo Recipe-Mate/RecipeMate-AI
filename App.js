@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
-import { View, Text, Button } from 'react-native';
-import TextRecognition, { TextRecognitionScript } from '@react-native-ml-kit/text-recognition';
+import { View, Text, Button, Alert, StyleSheet } from 'react-native';
 import { launchImageLibrary } from 'react-native-image-picker';
+import TextRecognition, { TextRecognitionScript } from '@react-native-ml-kit/text-recognition';
 
 const App = () => {
   const [recognizedText, setRecognizedText] = useState('');
@@ -27,10 +27,28 @@ const App = () => {
     });
   };
 
+  const openCamera = () => {
+    console.log('Camera button pressed!');
+  };
+
+  const showOptionDialog = () => {
+    Alert.alert(
+      'Choose Option',
+      'Do you want to open the Camera or choose from the Gallery?',
+      [
+        { text: 'Camera', onPress: openCamera },
+        { text: 'Gallery', onPress: chooseImage },
+        { text: 'Cancel', style: 'cancel' },
+      ]
+    );
+  };
+
   return (
-    <View>
-      <Button title="Choose Image" onPress={chooseImage} />
-      <Text style={{ marginTop: 20 }}>{recognizedText ? recognizedText : 'No text recognized'}</Text>
+    <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+      <Button title="Choose Image" onPress={showOptionDialog} />
+      <Text style={{ marginTop: 20, paddingHorizontal: 20, textAlign: 'center' }}>
+        {recognizedText ? recognizedText : 'No text recognized yet.'}
+      </Text>
     </View>
   );
 };
