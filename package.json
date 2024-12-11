@@ -13,8 +13,7 @@
     "@react-native-ml-kit/text-recognition": "^1.5.2",
     "react": "18.3.1",
     "react-native": "0.76.5",
-    "react-native-image-picker": "^7.2.3",
-    "react-native-vision-camera": "^4.6.3"
+    "react-native-image-picker": "^7.2.3"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",

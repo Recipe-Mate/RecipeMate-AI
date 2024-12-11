@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { View, Text, Button, Alert, StyleSheet } from 'react-native';
-import { launchImageLibrary } from 'react-native-image-picker';
+import { View, Text, Button, Alert, StyleSheet, PermissionsAndroid, Platform } from 'react-native';
+import { launchImageLibrary, launchCamera } from 'react-native-image-picker';
 import TextRecognition, { TextRecognitionScript } from '@react-native-ml-kit/text-recognition';
 
 const App = () => {
@@ -18,6 +18,50 @@ const App = () => {
     }
   };
 
+  const requestCameraPermission = async () => {
+    if (Platform.OS === 'android') {
+      try {
+        const granted = await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.CAMERA,
+          {
+            title: 'Camera Permission',
+            message: 'This app needs access to your camera to take photos.',
+            buttonNeutral: 'Ask Me Later',
+            buttonNegative: 'Cancel',
+            buttonPositive: 'OK',
+          }
+        );
+        if (granted === PermissionsAndroid.RESULTS.GRANTED) {
+          console.log('Camera permission granted');
+          return true;
+        } else {
+          console.log('Camera permission denied');
+          return false;
+        }
+      } catch (err) {
+        console.warn(err);
+        return false;
+      }
+    }
+    return true;
+  };
+
+  const openCamera = async () => {
+    const hasPermission = await requestCameraPermission();
+    if (hasPermission) {
+      launchCamera({ mediaType: 'photo', saveToPhotos: true }, (response) => {
+        if (response.didCancel) {
+          console.log('User cancelled camera');
+        } else if (response.errorCode) {
+          console.log('Camera error:', response.errorCode);
+        } else if (response.assets && response.assets.length > 0) {
+          const imageUri = response.assets[0].uri;
+          recognizeTextFromImage(imageUri);
+        }
+      });
+    }
+  };
+
   const chooseImage = () => {
     launchImageLibrary({ mediaType: 'photo' }, (response) => {
       if (response.assets && response.assets.length > 0) {
@@ -25,10 +69,6 @@ const App = () => {
         recognizeTextFromImage(imageUri);
       }
     });
-  };
-
-  const openCamera = () => {
-    console.log('Camera button pressed!');
   };
 
   const showOptionDialog = () => {
