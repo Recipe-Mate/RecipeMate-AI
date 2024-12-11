@@ -11,9 +11,14 @@
   },
   "dependencies": {
     "@react-native-ml-kit/text-recognition": "^1.5.2",
-    "react": "18.3.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
     "react-native": "0.76.5",
-    "react-native-image-picker": "^7.2.3"
+    "react-native-gesture-handler": "^2.21.2",
+    "react-native-image-picker": "^7.2.3",
+    "react-native-reanimated": "^3.16.5",
+    "react-native-svg": "^15.10.1",
+    "react-native-view-shot": "^4.0.3"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
