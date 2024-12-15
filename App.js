@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
-import { View, Text, Button, StyleSheet, Image, Dimensions, ScrollView } from 'react-native';
-import { launchImageLibrary } from 'react-native-image-picker';
+import React, { useState, useEffect } from 'react';
+import { View, Text, Button, StyleSheet, Image, Dimensions, ScrollView, PermissionsAndroid, Platform } from 'react-native';
+import { launchCamera, launchImageLibrary } from 'react-native-image-picker';
 import TextRecognition, { TextRecognitionScript } from '@react-native-ml-kit/text-recognition';
 import Svg, { Rect } from 'react-native-svg';
 
@@ -14,103 +14,111 @@ const App = () => {
   const [endCoords, setEndCoords] = useState(null);
   const [imageSize, setImageSize] = useState({ width: 0, height: 0 });
 
+  // 권한 요청
+  useEffect(() => {
+    const requestCameraPermission = async () => {
+      if (Platform.OS === 'android') {
+        try {
+          const granted = await PermissionsAndroid.request(
+            PermissionsAndroid.PERMISSIONS.CAMERA,
+            {
+              title: 'Camera Permission',
+              message: 'This app requires camera access to scan receipts.',
+              buttonNeutral: 'Ask Me Later',
+              buttonNegative: 'Cancel',
+              buttonPositive: 'OK',
+            }
+          );
+          if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
+            console.log('Camera permission denied');
+          }
+        } catch (err) {
+          console.warn(err);
+        }
+      }
+    };
+    requestCameraPermission();
+  }, []);
+
   // 상품명 추출 함수
   const extractProductNames = (text) => {
     const lines = text.split('\n');
     const productStartIndex = lines.findIndex((line) => /(단가|수량|금액)/.test(line));
     if (productStartIndex === -1) return [];
-    const productEndIndex = lines.findIndex(
-      (line, index) => index > productStartIndex && /(합계|총구매액)/.test(line)
-    );
+    const productEndIndex = lines.findIndex((line, index) => index > productStartIndex && /(합계|총구매액)/.test(line));
     const productLines = lines
       .slice(productStartIndex + 1, productEndIndex === -1 ? undefined : productEndIndex)
       .filter((line) => /[가-힣]+/.test(line) && /\d/.test(line));
-    return productLines;
+    return productLines.map((product, index) => ({ id: index + 1, name: product }));
   };
 
-  // 이미지 선택 함수
-  const chooseImage = () => {
-    launchImageLibrary({ mediaType: 'photo' }, (response) => {
-      if (response.assets && response.assets.length > 0) {
-        const uri = response.assets[0].uri;
-        setImageUri(uri);
-        setOcrResult([]);
-        setRecognizedProducts([]);
-        setStartCoords(null);
-        setEndCoords(null);
-
-        // 이미지의 실제 크기 가져오기
-        Image.getSize(uri, (width, height) => {
-          setImageSize({ width, height });
-          console.log('Actual image size:', { width, height });
-        });
-      }
-    });
+  // 영수증 스캔하기
+  const scanReceipt = () => {
+    launchCamera({ mediaType: 'photo' }, handleImageResponse);
   };
 
-  // 선택된 영역에서 텍스트 인식
-  const recognizeTextFromArea = async () => {
-    if (!startCoords || !endCoords) {
-      console.log('Error: Please select an area first.');
-      return;
+  // 사진 업로드하기
+  const uploadPhoto = () => {
+    launchImageLibrary({ mediaType: 'photo' }, handleImageResponse);
+  };
+
+  // 이미지 처리 함수
+  const handleImageResponse = (response) => {
+    if (response.assets && response.assets.length > 0) {
+      const uri = response.assets[0].uri;
+      setImageUri(uri);
+      setOcrResult([]);
+      setRecognizedProducts([]);
+      setStartCoords(null);
+      setEndCoords(null);
+      
+      Image.getSize(uri, (width, height) => setImageSize({ width, height }));
     }
+  };
 
-    // 표시된 이미지 크기와 실제 이미지 크기 간의 비율 계산
-    const displayedWidth = width; // 화면에 표시된 이미지의 가로 크기
-    const displayedHeight = (width / imageSize.width) * imageSize.height; // 비율에 따른 세로 크기
-    const scaleX = imageSize.width / displayedWidth;
+  // 텍스트 인식
+  const recognizeTextFromArea = async () => {
+    if (!startCoords || !endCoords) return;
+
+    const displayedHeight = (width / imageSize.width) * imageSize.height;
+    const scaleX = imageSize.width / width;
     const scaleY = imageSize.height / displayedHeight;
 
-    // 선택된 좌표를 실제 이미지 크기에 맞게 변환
     const realStartX = startCoords.x * scaleX;
     const realStartY = startCoords.y * scaleY;
     const realEndX = endCoords.x * scaleX;
     const realEndY = endCoords.y * scaleY;
 
-    console.log('Displayed coordinates:', startCoords, endCoords);
-    console.log('Converted coordinates:', {
-      start: { x: realStartX, y: realStartY },
-      end: { x: realEndX, y: realEndY },
-    });
-
     try {
       const result = await TextRecognition.recognize(imageUri, TextRecognitionScript.KOREAN);
-      if (result && result.text) {
+      if (result?.text) {
         const products = extractProductNames(result.text);
         setRecognizedProducts(products);
         setOcrResult(result.text.split('\n'));
-      } else {
-        console.error('Text recognition returned empty result');
       }
     } catch (error) {
-      console.error('Text recognition failed:', error);
+      console.error('OCR Error:', error);
     }
   };
 
-  const handleTouchStart = (event) => {
-    const { locationX, locationY } = event.nativeEvent;
-    setStartCoords({ x: locationX, y: locationY });
-  };
-
-  const handleTouchMove = (event) => {
-    const { locationX, locationY } = event.nativeEvent;
-    setEndCoords({ x: locationX, y: locationY });
-  };
-
-  const handleTouchEnd = () => {
-    console.log('Selected area:', { start: startCoords, end: endCoords });
-  };
-
   return (
-    <View style={{ flex: 1 }}>
-      <Button title="Choose Image" onPress={chooseImage} />
-      {imageUri && (
-        <View style={{ flex: 1, marginTop: 20 }}>
+    <View style={{ flex: 1, padding: 10 }}>
+      {!imageUri ? (
+        <View>
+          <Text style={{ fontSize: 24, fontWeight: 'bold', textAlign: 'center', marginBottom: 10 }}>영수증 분석하기</Text>
+          <View style={{ flexDirection: 'column', justifyContent: 'space-around', marginVertical: 10 }}>
+            <Button title="영수증 스캔하기" onPress={scanReceipt} />
+            <View style={{ marginVertical: 10 }} />
+            <Button title="사진 업로드하기" onPress={uploadPhoto} />
+          </View>
+        </View>
+      ) : (
+        <View style={{ flex: 1, alignItems: 'center' }}>
           <View
-            style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}
-            onTouchStart={handleTouchStart}
-            onTouchMove={handleTouchMove}
-            onTouchEnd={handleTouchEnd}
+            style={{ marginTop: 10 }}
+            onTouchStart={(e) => setStartCoords({ x: e.nativeEvent.locationX, y: e.nativeEvent.locationY })}
+            onTouchMove={(e) => setEndCoords({ x: e.nativeEvent.locationX, y: e.nativeEvent.locationY })}
+            onTouchEnd={() => console.log('Selected:', startCoords, endCoords)}
           >
             <Image source={{ uri: imageUri }} style={{ width: width, height: 300, resizeMode: 'contain' }} />
             {startCoords && endCoords && (
@@ -127,27 +135,17 @@ const App = () => {
               </Svg>
             )}
           </View>
-          <Button title="Recognize Text from Selected Area" onPress={recognizeTextFromArea} />
+          <Button title="촬영 완료" onPress={recognizeTextFromArea} />
+          <ScrollView style={{ marginTop: 10, width: '100%' }}>
+            <Text style={{ fontSize: 18, fontWeight: 'bold', marginTop: 10 }}>추출된 상품명:</Text>
+            {recognizedProducts.map((product) => (
+              <Text key={product.id} style={{ color: 'green', marginLeft: 10 }}>
+                {`ID: ${product.id}, Name: ${product.name}`}
+              </Text>
+            ))}
+          </ScrollView>
         </View>
       )}
-      <ScrollView style={{ padding: 10 }}>
-        <Text style={{ fontSize: 18, fontWeight: 'bold' }}>OCR Result:</Text>
-        {ocrResult.length > 0
-          ? ocrResult.map((line, index) => (
-              <Text key={index} style={{ marginBottom: 10 }}>
-                {line}
-              </Text>
-            ))
-          : <Text>No OCR result yet.</Text>}
-        <Text style={{ fontSize: 18, fontWeight: 'bold', marginTop: 20 }}>Recognized Products:</Text>
-        {recognizedProducts.length > 0
-          ? recognizedProducts.map((product, index) => (
-              <Text key={index} style={{ marginBottom: 10, color: 'green' }}>
-                {product}
-              </Text>
-            ))
-          : <Text>No products recognized yet.</Text>}
-      </ScrollView>
     </View>
   );
 };
