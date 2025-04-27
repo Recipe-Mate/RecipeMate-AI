@@ -17,13 +17,12 @@ import TextRecognition, { TextRecognitionScript } from '@react-native-ml-kit/tex
 const { width } = Dimensions.get('window');
 
 const App = () => {
-  const [imageUri, setImageUri] = useState(null); // 찍은 URI 이미지 
-  const [groupedLines, setGroupedLines] = useState([]); // OCR로 인식된 텍스트 그룹 
-  const [normalizedLines, setNormalizedLines] = useState([]); // 정규화된 텍스트 라인
-  const [jsonData, setJsonData] = useState([]); // 최종 정리된 json 데이터 
+  const [imageUri, setImageUri] = useState(null);
+  const [groupedLines, setGroupedLines] = useState([]);
+  const [normalizedLines, setNormalizedLines] = useState([]);
+  const [jsonData, setJsonData] = useState([]);
   const [displayedSize, setDisplayedSize] = useState({ width: 0, height: 0 });
 
-  // 카메라 접근 권한 요청 
   useEffect(() => {
     const requestCameraPermission = async () => {
       if (Platform.OS === 'android') {
@@ -49,34 +48,24 @@ const App = () => {
     requestCameraPermission();
   }, []);
 
-  // 상품명 전처리 
   const preprocessName = (name) => {
     let processed = name;
-    // 1. 순번 + 알파벳 1글자 제거 (예: 001p, 002d)
-    processed = processed.replace(/^\d+\s*[a-zA-Z]/, '');
-  
-    // 2. 만약 아직 숫자만 남아 있으면 추가로 숫자만 제거
-    processed = processed.replace(/^\d+\s*/, '');
-
-    // 3. 공백 제거
-    processed = processed.replace(/\s+/g, '');
-
-    // 4. 한글+숫자 붙어있으면 띄우기새
-    processed = processed.replace(/([가-힣])(\d)/g, '$1 $2');
-
-    // 5. 소문자 → 대문자
-    processed = processed.replace(/[A-Z]/g, (c) => c.toUpperCase());
-
-return processed;
+    processed = processed.replace(/^\d+\s*[a-zA-Z]/, ''); // 순번+알파벳 제거
+    processed = processed.replace(/^\d+\s*/, ''); // 숫자만 제거
+    processed = processed.replace(/[^가-힣0-9a-zA-Z\s]/g, ''); // 특수문자 제거
+    processed = processed
+      .replace(/([가-힣])([a-zA-Z0-9])/g, '$1 $2')
+      .replace(/([a-zA-Z])([가-힣])/g, '$1 $2'); // 종류 다른 문자 공백 추가
+    processed = processed.replace(/\s+/g, ' ').trim(); // 여러 공백 정리
+    processed = processed.toLowerCase(); // 소문자화
+    return processed;
   };
 
-  // 이미지 처리 OCR 진행 
   const processImage = async (uri) => {
     setImageUri(uri);
     Image.getSize(uri, (w, h) => setDisplayedSize({ width: w, height: h }));
 
     try {
-      // 불필요한 정보 필터링 
       const result = await TextRecognition.recognize(uri, TextRecognitionScript.KOREAN);
       if (result?.blocks) {
         const lines = result.blocks.flatMap((block) =>
@@ -89,7 +78,6 @@ return processed;
           !/\d{1,3}[,.][^\s]{3}(?![^\s])/.test(line.text)
         );
 
-        // y축을 기준으로 묶음 
         const grouped = [];
         lines.sort((a, b) => a.y - b.y);
         lines.forEach((line) => {
@@ -101,7 +89,6 @@ return processed;
           }
         });
 
-        // 상품명, 용량, 개수 분리 후 json형태로 만들기
         const normalized = lines.filter((line) => /^\s*0{0,2}\d{1,2}P?\b/.test(line.text));
         setGroupedLines(grouped);
         setNormalizedLines(normalized);
@@ -116,12 +103,14 @@ return processed;
 
           for (let i = 0; i < half; i++) {
             let name = cleanedItems[i];
+            let weight = '0';
             let unit = '없음';
 
-            const unitMatch = name.match(/(\d+(\.\d+)?\s*(kg|g|ml|l))/i);
-            if (unitMatch) {
-              unit = unitMatch[0].replace(/\s+/g, '');
-              name = name.substring(0, unitMatch.index);
+            const match = name.match(/(\d+(?:\.\d+)?)(kg|g|ml|l)/i);
+            if (match) {
+              weight = match[1]; // 숫자만
+              unit = match[2].toLowerCase(); // 단위만
+              name = name.substring(0, match.index); // 무게 나오기 전까지만 상품명
             } else {
               const numberIndex = name.search(/[0-9]/);
               if (numberIndex !== -1) {
@@ -129,15 +118,21 @@ return processed;
               }
             }
 
-            jsonResult.push({ name: name.trim(), unit: unit, count: items[i + half] });
+            jsonResult.push({
+              name: name.trim(),
+              weight: weight,
+              unit: unit,
+              count: items[i + half],
+            });
           }
         } else {
           cleanedItems.forEach((item) => {
             if (/[가-힣]{2,}/.test(item)) {
-              jsonResult.push({ name: item.trim(), unit: '없음', count: '1' });
+              jsonResult.push({ name: item.trim(), weight: '0', unit: '없음', count: '1' });
             }
           });
         }
+
         setJsonData(jsonResult);
       }
     } catch (e) {
@@ -196,10 +191,10 @@ return processed;
             <Text key={idx} style={{ marginLeft: 10 }}>🔹 {line.text}</Text>
           ))}
 
-          <Text style={styles.sectionTitle}> JSON 결과</Text>
+          <Text style={styles.sectionTitle}>JSON 결과</Text>
           {jsonData.map((item, idx) => (
             <Text key={idx} style={{ marginLeft: 10 }}>
-              🔸 {item.name} - {item.unit} - {item.count}
+              🔸 {item.name} - {item.weight} - {item.unit} - {item.count}
             </Text>
           ))}
 
