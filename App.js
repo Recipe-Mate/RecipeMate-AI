@@ -13,19 +13,17 @@ import {
 } from 'react-native';
 import { launchImageLibrary, launchCamera } from 'react-native-image-picker';
 import TextRecognition, { TextRecognitionScript } from '@react-native-ml-kit/text-recognition';
-import Svg, { Rect } from 'react-native-svg';
 
 const { width } = Dimensions.get('window');
 
 const App = () => {
-  const [imageUri, setImageUri] = useState(null);
-  const [groupedLines, setGroupedLines] = useState([]);
-  const [normalizedLines, setNormalizedLines] = useState([]);
-  const [jsonData, setJsonData] = useState([]);
-  const [boundingRects, setBoundingRects] = useState([]);
+  const [imageUri, setImageUri] = useState(null); // 찍은 URI 이미지 
+  const [groupedLines, setGroupedLines] = useState([]); // OCR로 인식된 텍스트 그룹 
+  const [normalizedLines, setNormalizedLines] = useState([]); // 정규화된 텍스트 라인
+  const [jsonData, setJsonData] = useState([]); // 최종 정리된 json 데이터 
   const [displayedSize, setDisplayedSize] = useState({ width: 0, height: 0 });
-  const [originalSize, setOriginalSize] = useState({ width: 0, height: 0 });
 
+  // 카메라 접근 권한 요청 
   useEffect(() => {
     const requestCameraPermission = async () => {
       if (Platform.OS === 'android') {
@@ -51,37 +49,47 @@ const App = () => {
     requestCameraPermission();
   }, []);
 
+  // 상품명 전처리 
   const preprocessName = (name) => {
-    // 1. 앞쪽 숫자 제거
-    let processed = name.replace(/^\d+\s*/, '');
-    // 2. 공백 제거
-    processed = processed.replace(/\s+/g, '');
-    // 3. 한글 + 숫자 사이에 공백 삽입
-    processed = processed.replace(/([가-힣])(\d)/g, '$1 $2');
-    // 4. 영문 소문자로
-    processed = processed.replace(/[A-Z]/g, (c) => c.toLowerCase());
+    let processed = name;
+    // 1. 순번 + 알파벳 1글자 제거 (예: 001p, 002d)
+    processed = processed.replace(/^\d+\s*[a-zA-Z]/, '');
+  
+    // 2. 만약 아직 숫자만 남아 있으면 추가로 숫자만 제거
+    processed = processed.replace(/^\d+\s*/, '');
 
-    return processed;
+    // 3. 공백 제거
+    processed = processed.replace(/\s+/g, '');
+
+    // 4. 한글+숫자 붙어있으면 띄우기새
+    processed = processed.replace(/([가-힣])(\d)/g, '$1 $2');
+
+    // 5. 소문자 → 대문자
+    processed = processed.replace(/[A-Z]/g, (c) => c.toUpperCase());
+
+return processed;
   };
 
+  // 이미지 처리 OCR 진행 
   const processImage = async (uri) => {
     setImageUri(uri);
-    Image.getSize(uri, (w, h) => setOriginalSize({ width: w, height: h }));
+    Image.getSize(uri, (w, h) => setDisplayedSize({ width: w, height: h }));
 
     try {
+      // 불필요한 정보 필터링 
       const result = await TextRecognition.recognize(uri, TextRecognitionScript.KOREAN);
       if (result?.blocks) {
         const lines = result.blocks.flatMap((block) =>
           block.lines.map((line) => ({
             text: line.text,
             y: line.bounding?.top ?? 0,
-            bounding: line.bounding,
           }))
         ).filter((line) =>
           !/\d{10,}/.test(line.text) &&
           !/\d{1,3}[,.][^\s]{3}(?![^\s])/.test(line.text)
         );
 
+        // y축을 기준으로 묶음 
         const grouped = [];
         lines.sort((a, b) => a.y - b.y);
         lines.forEach((line) => {
@@ -93,24 +101,40 @@ const App = () => {
           }
         });
 
+        // 상품명, 용량, 개수 분리 후 json형태로 만들기
         const normalized = lines.filter((line) => /^\s*0{0,2}\d{1,2}P?\b/.test(line.text));
         setGroupedLines(grouped);
         setNormalizedLines(normalized);
-        setBoundingRects(lines.map((l) => l.bounding).filter(Boolean));
-        
+
         const items = normalized.map((line) => line.text);
         const cleanedItems = items.map((item) => preprocessName(item));
 
         const jsonResult = [];
+
         if (cleanedItems.length % 2 === 0) {
           const half = cleanedItems.length / 2;
+
           for (let i = 0; i < half; i++) {
-            jsonResult.push({ name: cleanedItems[i], count: items[i + half] });
+            let name = cleanedItems[i];
+            let unit = '없음';
+
+            const unitMatch = name.match(/(\d+(\.\d+)?\s*(kg|g|ml|l))/i);
+            if (unitMatch) {
+              unit = unitMatch[0].replace(/\s+/g, '');
+              name = name.substring(0, unitMatch.index);
+            } else {
+              const numberIndex = name.search(/[0-9]/);
+              if (numberIndex !== -1) {
+                name = name.substring(0, numberIndex);
+              }
+            }
+
+            jsonResult.push({ name: name.trim(), unit: unit, count: items[i + half] });
           }
         } else {
           cleanedItems.forEach((item) => {
             if (/[가-힣]{2,}/.test(item)) {
-              jsonResult.push({ name: item, count: '1' });
+              jsonResult.push({ name: item.trim(), unit: '없음', count: '1' });
             }
           });
         }
@@ -118,22 +142,6 @@ const App = () => {
       }
     } catch (e) {
       console.error('OCR 실패:', e);
-    }
-  };
-
-  const sendToServer = async () => {
-    try {
-      const response = await fetch('http://172.30.1.44:8080/api/receipt/upload', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(jsonData),
-      });
-      const resText = await response.text();
-      console.log('서버 응답:', resText);
-      alert('서버로 전송 성공!');
-    } catch (error) {
-      console.error('전송 실패:', error); 
-      alert('서버로 전송 실패 😢');
     }
   };
 
@@ -158,13 +166,8 @@ const App = () => {
     setGroupedLines([]);
     setNormalizedLines([]);
     setJsonData([]);
-    setBoundingRects([]);
     setDisplayedSize({ width: 0, height: 0 });
-    setOriginalSize({ width: 0, height: 0 });
   };
-
-  const scaleX = originalSize.width ? displayedSize.width / originalSize.width : 1;
-  const scaleY = originalSize.height ? displayedSize.height / originalSize.height : 1;
 
   return (
     <View style={{ flex: 1 }}>
@@ -176,32 +179,10 @@ const App = () => {
         </View>
       ) : (
         <ScrollView style={{ padding: 10 }}>
-          <View style={{ position: 'relative' }}>
-            <Image
-              source={{ uri: imageUri }}
-              style={{ width: width, height: 300, resizeMode: 'contain' }}
-              onLayout={(e) => {
-                const { width, height } = e.nativeEvent.layout;
-                setDisplayedSize({ width, height });
-              }}
-            />
-            <Svg
-              style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: 300 }}
-            >
-              {boundingRects.map((rect, idx) => (
-                <Rect
-                  key={idx}
-                  x={rect.left * scaleX}
-                  y={rect.top * scaleY}
-                  width={rect.width * scaleX}
-                  height={rect.height * scaleY}
-                  stroke="red"
-                  strokeWidth="1"
-                  fill="rgba(255,0,0,0.1)"
-                />
-              ))}
-            </Svg>
-          </View>
+          <Image
+            source={{ uri: imageUri }}
+            style={{ width: width, height: 300, resizeMode: 'contain' }}
+          />
 
           <Text style={styles.sectionTitle}>📄 OCR 결과 (Y좌표 기준 묶음)</Text>
           {groupedLines.map((group, idx) => (
@@ -215,14 +196,12 @@ const App = () => {
             <Text key={idx} style={{ marginLeft: 10 }}>🔹 {line.text}</Text>
           ))}
 
-          <Text style={styles.sectionTitle}> JSON 파일</Text>
+          <Text style={styles.sectionTitle}> JSON 결과</Text>
           {jsonData.map((item, idx) => (
             <Text key={idx} style={{ marginLeft: 10 }}>
-              🔸 {item.name} - {item.count}
+              🔸 {item.name} - {item.unit} - {item.count}
             </Text>
           ))}
-
-          <Button title="서버로 전송" onPress={sendToServer} />
 
           <TouchableOpacity onPress={reset} style={{ marginTop: 20 }}>
             <Text style={{ color: 'blue', fontSize: 16 }}>⬅ 뒤로가기</Text>
