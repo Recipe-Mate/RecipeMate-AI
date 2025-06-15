@@ -82,6 +82,8 @@ android {
         applicationId "com.ocr"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
+        renderscriptTargetApi 21
+        renderscriptSupportModeEnabled true
         versionCode 1
         versionName "1.0"
     }

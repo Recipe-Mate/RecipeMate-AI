@@ -17,11 +17,11 @@ import TextRecognition, { TextRecognitionScript } from '@react-native-ml-kit/tex
 const { width } = Dimensions.get('window');
 
 const excludedBrands = [
-'해태제과','오리온','크라운제과','농심','롯데제과','삼양식품','빙그레','포카칩','롯데푸드',
-'오뚜기','팔도','CJ제일제당','해찬들','대상','청정원','샘표식품','풀무원','양반','동원F&B',
-'사조대림','백설','샘표','이금기','해표','비비고','롯데칠성음료','광동제약','웅진식품',
-'동아오츠카','해태htb','코카콜라음료','델몬트','남양유업','매일유업','서울우유','푸르밀',
-'종가집','동원','롯데','해태','동원','국산'
+  '해태제과','오리온','크라운제과','농심','롯데제과','삼양식품','빙그레','포카칩','롯데푸드',
+  '오뚜기','팔도','CJ제일제당','해찬들','대상','청정원','샘표식품','풀무원','양반','동원F&B',
+  '사조대림','백설','샘표','이금기','해표','비비고','롯데칠성음료','광동제약','웅진식품',
+  '동아오츠카','해태htb','코카콜라음료','델몬트','남양유업','매일유업','서울우유','푸르밀',
+  '종가집','동원','롯데','해태','동원','국산'
 ].map((brand) => brand.toLowerCase());
 
 const App = () => {
@@ -60,32 +60,32 @@ const App = () => {
   const preprocessName = (name) => {
     let raw = name.trim();
 
-    // 숫자만 있거나 숫자 + 공백만 있는 경우
     if (/^[0-9]+\s*$/.test(raw)) {
       if (raw.trim().length === 1) {
-        return raw.trim(); // 숫자 1개 또는 "4 " → "4"
+        return raw.trim();
       } else {
-        return ''; // 숫자 2개 이상 → 제거
+        return '';
       }
     }
 
-    // 일반 정제 과정
     let processed = raw;
-    processed = processed.replace(/^[0-9]+\s*[a-zA-Z]/, '');
-    processed = processed.replace(/^[0-9]+\s*/, '');
-    processed = processed.replace(/[^가-힣0-9a-zA-Z\/\s]/g, ''); // '/'는 남김
+    
+    processed = processed.replace(/^[0-9]+\s*[a-zA-Z]/, ''); // 숫자 + 영문 조합으로 시작하는 경우 제거
+    processed = processed.replace(/^[0-9]+\s*/, ''); // 숫자 + 공백 조합으로 시작하는 경우 제거
+    processed = processed.replace(/[^가-힣0-9a-zA-Z\/\s]/g, ''); // 한글, 숫자, 영문, 슬래시(/), 공백 외의 모든 문자 제거
 
-    // '/' 기준으로 앞부분만 남기기 (용량 추출 위해 뒤쪽은 별도로 유지)
     const slashIndex = processed.indexOf('/');
     if (slashIndex !== -1) {
       processed = processed.substring(0, slashIndex);
     }
 
+    // 한글+숫자, 한글+영문, 영문+한글 사이에 공백 삽입
     processed = processed
       .replace(/([가-힣])([a-zA-Z0-9])/g, '$1 $2')
       .replace(/([a-zA-Z])([가-힣])/g, '$1 $2');
     processed = processed.replace(/\s+/g, ' ').trim().toLowerCase();
 
+    // 브랜드명이 포함되면 제거
     excludedBrands.forEach((brand) => {
       processed = processed.replace(new RegExp(brand, 'gi'), '').trim();
     });
@@ -106,8 +106,9 @@ const App = () => {
             y: line.bounding?.top ?? 0,
           }))
         ).filter((line) =>
-          !/\d{10,}/.test(line.text) &&
-          !/\d{1,3}[,.][^\s]{3}(?![^\s])/.test(line.text)
+          
+          !/\d{10,}/.test(line.text) && // 10자리 이상 숫자 (전화번호, 바코드 등) 제거
+          !/\d{1,3}[,.][^\s]{3}(?![^\s])/.test(line.text) // 소수점이나 쉼표 포함된 가격 형식 제거
         );
 
         const grouped = [];
@@ -121,26 +122,33 @@ const App = () => {
           }
         });
 
-        const normalized = lines.filter((line) => /^\s*0{0,2}\d{1,2}P?\b/.test(line.text));
+        // 수량으로 사용할 텍스트 필터링
+        const normalized = lines.filter((line) =>
+          /^\s*0{0,2}\d{1,2}P?\b/.test(line.text) && !line.text.includes(',')
+        );
         setGroupedLines(grouped);
         setNormalizedLines(normalized);
 
         const items = normalized.map((line) => line.text);
         let processed = items.map((item) => preprocessName(item)).filter(Boolean);
 
-        const withText = processed.filter(x => /[a-zA-Z가-힣]/.test(x));
-        const onlyDigits = processed.filter(x => /^[0-9]$/.test(x));
-        const reordered = [...withText, ...onlyDigits];
+        const names = [];
+        const counts = [];
 
-        setFilteredItems(reordered);
+        processed.forEach((text) => {
+          if (/^\d/.test(text)) {
+            counts.push(text);
+          } else {
+            names.push(text);
+          }
+        });
 
         const jsonResult = [];
-        const len = Math.min(withText.length, onlyDigits.length);
-
-        for (let i = 0; i < len; i++) {
-          let name = withText[i];
+        for (let i = 0; i < names.length; i++) {
+          let name = names[i];
           let weight = '0';
           let unit = 'EA';
+          let count = counts[i] ?? '1';
 
           const match = name.match(/(\d+(?:\.\d+)?)(kg|g|ml|l)/i);
           if (match) {
@@ -156,12 +164,13 @@ const App = () => {
 
           jsonResult.push({
             name: name.trim(),
-            weight: weight,
-            unit: unit,
-            count: onlyDigits[i],
+            weight,
+            unit,
+            count,
           });
         }
 
+        setFilteredItems([...names, ...counts]);
         setJsonData(jsonResult);
       }
     } catch (e) {
